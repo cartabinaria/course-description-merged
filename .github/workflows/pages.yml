@@ -72,7 +72,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: scraper
     container:
-      image: ghcr.io/csunibo/build-image:latest
+      image: ghcr.io/cartabinaria/build-image:latest
     steps:
       - name: Download source artifact
         uses: actions/download-artifact@v4
