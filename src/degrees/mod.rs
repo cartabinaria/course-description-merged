@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2024 Stefano Volpe <foxy@teapot.ovh>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use std::{fmt::Write, fs, path::Path};
 
 use itertools::Itertools;
@@ -132,7 +136,7 @@ pub fn analyze_degree(degree: &Degree, output_dir: &Path) -> Option<()> {
         let teaching_desc = match teachings::get_desc_teaching_page(teaching_url) {
             Ok(desc) => desc,
             Err(e) => {
-                error!("\t\tCannot get description: {e:?}");
+                warn!("\t\tCannot get description: {e:?}");
                 continue;
             }
         };
