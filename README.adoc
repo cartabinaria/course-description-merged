@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2023 - 2024 Stefano Volpe <foxy@teapot.ovh>
+// SPDX-FileCopyrightText: 2023 Eyad Issa <eyadlorenzo@gmail.com>
+//
+// SPDX-License-Identifier: CC-BY-3.0
+
 = course-description-merged
 
 Un _webscraper_ che, quotidianamente, raccoglie tutti i corsi con descrizione e

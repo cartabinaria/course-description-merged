@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: NONE
+# SPDX-License-Identifier: CC0-1.0
+
 [submodule "config"]
 	path = config
 	url = git@github.com:csunibo/config

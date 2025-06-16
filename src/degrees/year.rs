@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2024 Stefano Volpe <foxy@teapot.ovh>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use chrono::Datelike;
 
 const SEPTEMBER: u32 = 9;
