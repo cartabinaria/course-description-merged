@@ -19,5 +19,5 @@ regex = "1.11.1"
 reqwest = { version = "0.12", features = ["blocking"] }
 scraper = "0.23.1"
 serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.140"
+serde_json = "1.0.145"
 substring = "1.4.5"
