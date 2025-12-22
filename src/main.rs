@@ -26,11 +26,15 @@ fn main() {
             return;
         };
     }
-    let mut index = "= Index\n\n".to_owned();
+    let mut index = "= Unified Course Descriptions for Some UNIBO Degrees\n\nhttps://cartabinaria.students.cs.unibo.it/en/wiki/web-scraper/course-description-merged/[Documentation]\n\n".to_owned();
     if let Some(deg) = degrees() {
         for d in deg {
             degrees::analyze_degree(&d, output_dir);
-            if let Err(e) = writeln!(index, "* xref:degree-{}.adoc[{}]", d.slug, d.name) {
+            if let Err(e) = writeln!(
+                index,
+                "== {}\n\nxref:degree-{}.adoc[web] | link:degree-{}.pdf[PDF] | link:degree-{}.adoc[Asciidoc]\n\n",
+                d.name, d.slug, d.slug, d.slug
+            ) {
                 error!("Could not append {}: {}", d.name, e);
             };
         }
