@@ -2,18 +2,25 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::{fmt::Write, fs, path::Path};
-
-use itertools::Itertools;
-use log::{error, info, warn};
-use scraper::Selector;
-
 pub mod teachings;
 pub mod year;
 
-lazy_static::lazy_static! {
+use eyre::{Result, eyre};
+use itertools::Itertools;
+use lazy_static::lazy_static;
+use log::{info, warn};
+use regex::Regex;
+use reqwest::blocking::get;
+use scraper::{Html, Selector};
+use serde::Deserialize;
+use serde_json::from_reader;
+use std::fs::File;
+use teachings::get_desc_teaching_page;
+use year::current_academic_year;
+
+lazy_static! {
     static ref TABLE: Selector = Selector::parse("td.title").unwrap();
-    static ref MISSING_TRANSLATIONS: std::collections::HashMap<String, String> = [
+    static ref MISSING_TRANSLATIONS: [(String, String); 5] = [
         ("BASI DI DATI".to_string(), "DATABASES".to_string()),
         (
             "INTRODUZIONE ALL'APPRENDIMENTO AUTOMATICO".to_string(),
@@ -28,11 +35,10 @@ lazy_static::lazy_static! {
             "Teaching contents".to_string(),
             "=== Teaching contents".to_string()
         )
-    ]
-    .into();
+    ];
 }
 
-#[derive(serde::Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone)]
 struct Predegree {
     id: String,
     name: String,
@@ -48,129 +54,107 @@ pub struct Degree {
 const DEGREES_PATH: &str = "config/degrees.json";
 
 fn to_lowercase_maybe(s: String, b: bool) -> String {
-    if b {
-        return s.to_lowercase();
-    }
-    s
+    if b { s.to_lowercase() } else { s }
 }
 
 fn parse_degree(predegree: &Predegree, academic_year: u32) -> Option<Degree> {
     let Predegree { name, id, code } = predegree;
     if name.is_empty() || id.is_empty() || code.is_empty() {
-        return None;
-    }
-    let unibo_slug = to_lowercase_maybe(
-        regex::Regex::new(r"( (e|per il|in) )|Magistrale|Master")
-            .unwrap()
-            .replace_all(name, "")
-            .to_string(),
-        !code.eq("9254/000"),
-    )
-    // AI's slug is kebab-case
-    .replace(' ', if code.eq("9063/000") { "-" } else { "" });
-    let degree_type = if name.contains("Magistrale") || name.contains("Master") {
-        "magistrale"
+        None
     } else {
-        "laurea"
-    };
-    Some(Degree {
-        name: name.to_string(),
-        slug: id.to_string(),
-        url: format!("https://corsi.unibo.it/{degree_type}/{unibo_slug}/insegnamenti/piano/{academic_year}/{code}/000/{academic_year}")
-    })
+        let unibo_slug = to_lowercase_maybe(
+            Regex::new(r"( (e|per il|in) )|Magistrale|Master")
+                .unwrap()
+                .replace_all(name, "")
+                .to_string(),
+            !code.eq("9254/000"),
+        )
+        // AI's slug is kebab-case
+        .replace(' ', if code.eq("9063/000") { "-" } else { "" });
+        let degree_type = if name.contains("Magistrale") || name.contains("Master") {
+            "magistrale"
+        } else {
+            "laurea"
+        };
+        Some(Degree {
+            name: name.to_string(),
+            slug: id.to_string(),
+            url: format!(
+                "https://corsi.unibo.it/{degree_type}/{unibo_slug}/insegnamenti/piano/{academic_year}/{code}/000/{academic_year}"
+            ),
+        })
+    }
 }
 
 fn to_degrees(predegrees: Vec<Predegree>) -> Vec<Degree> {
-    let academic_year = year::current_academic_year();
+    let academic_year = current_academic_year();
     predegrees
         .iter()
         .filter_map(|predegree| parse_degree(predegree, academic_year))
         .collect()
 }
 
-pub fn analyze_degree(degree: &Degree, output_dir: &Path) -> Option<()> {
-    let Degree { slug, name, url } = degree;
-    let output_file = output_dir.join(format!("degree-{slug}.adoc"));
+pub fn analyze_degree(degree: &Degree) -> Result<String> {
+    let Degree {
+        slug: _slug,
+        name,
+        url,
+    } = degree;
     info!("{name} [{url}]");
-    let res = match reqwest::blocking::get(url) {
-        Ok(res) => res,
-        Err(e) => {
-            error!("\t{e:?}");
-            return None;
-        }
-    };
-    let res2 = match res.error_for_status() {
-        Ok(res2) => res2,
-        Err(e) => {
-            error!("\t{e:?}");
-            return None;
-        }
-    };
-    let text = match res2.text() {
-        Ok(text) => text,
-        Err(e) => {
-            error!("\t{e:?}");
-            return None;
-        }
-    };
-    let document = scraper::Html::parse_document(&text);
+    let res = get(url).map_err(|e| eyre!("\tNetwork error: {e}"))?;
+    let res2 = res
+        .error_for_status()
+        .map_err(|e| eyre!("\tServer error: {e}"))?;
+    let text = res2.text().map_err(|e| eyre!("\tDecoding error: {e}"))?;
+    let document = Html::parse_document(&text);
     let title_list = document.select(&TABLE);
-    let mut buf = format!("= {name}\n\n");
-    for item in title_list {
-        let mut entry_doc = "".to_string();
-        let a_el = item
-            .children()
-            .filter_map(|f| f.value().as_element())
-            .find(|r| r.name() == "a")
-            .and_then(|a_el| a_el.attr("href"));
-        let temp_name = item.text().join("");
-        let name = temp_name.trim();
-        let teaching_url = match a_el {
-            Some(a) => a,
-            None => {
-                warn!("\tMissing link: {name}");
-                continue;
-            }
-        };
-        info!("\tVisiting {name}");
-        let teaching_desc = match teachings::get_desc_teaching_page(teaching_url) {
-            Ok(desc) => desc,
-            Err(e) => {
-                warn!("\t\tCannot get description: {e:?}");
-                continue;
-            }
-        };
-        entry_doc += "\n";
-        entry_doc += teaching_desc.as_str();
-        for (source, replacement) in MISSING_TRANSLATIONS.iter() {
-            entry_doc = entry_doc.replace(source, replacement);
-        }
-        if let Err(e) = buf.write_str(&entry_doc) {
-            error!("\t\tCannot append: {e:?}");
-            return None;
-        };
-    }
-    if let Err(e) = fs::write(output_file, buf) {
-        error!("\t\tCannot write: {e:?}");
-        return None;
-    };
-    Some(())
+    let buf = format!("= {name}\n\n")
+        + title_list
+            .filter_map(|item| {
+                let a_el = item
+                    .children()
+                    .filter_map(|f| f.value().as_element())
+                    .find(|r| r.name() == "a")
+                    .and_then(|a_el| a_el.attr("href"));
+                let temp_name = item.text().join("");
+                let name = temp_name.trim();
+                info!("\tVisiting {name}");
+                match a_el {
+                    Some(link) => {
+                        let teaching_desc = get_desc_teaching_page(link);
+                        match teaching_desc {
+                            Ok(desc) => {
+                                let entry_doc = "\n".to_string() + desc.as_str();
+                                Some(MISSING_TRANSLATIONS.iter().fold(
+                                    entry_doc,
+                                    |entry_doc, (source, replacement)| {
+                                        entry_doc.replace(source, replacement)
+                                    },
+                                ))
+                            }
+                            Err(e) => {
+                                warn!("\t\tCannot get description: {e:?}");
+                                None
+                            }
+                        }
+                    }
+                    None => {
+                        warn!("\t\tMissing link: {name}");
+                        None
+                    }
+                }
+            })
+            .join("")
+            .as_str();
+    Ok(buf)
 }
 
-pub fn degrees() -> Option<Vec<Degree>> {
-    let file = match fs::File::open(DEGREES_PATH) {
-        Ok(file) => file,
-        Err(error) => {
-            error!("Reading {DEGREES_PATH:?}: {error:?}");
-            return None;
-        }
-    };
-    let json: Vec<Predegree> = match serde_json::from_reader(file) {
-        Ok(json) => json,
-        Err(error) => {
-            error!("Parsing {DEGREES_PATH}: {error:?}");
-            return None;
-        }
-    };
-    Some(to_degrees(json))
+pub fn degrees() -> Result<Vec<Degree>> {
+    match File::open(DEGREES_PATH) {
+        Ok(file) => match from_reader(file) {
+            Ok(json) => Ok(to_degrees(json)),
+            Err(error) => Err(eyre!("Parsing {DEGREES_PATH}: {error:?}")),
+        },
+        Err(error) => Err(eyre!("Reading {DEGREES_PATH:?}: {error:?}")),
+    }
 }
