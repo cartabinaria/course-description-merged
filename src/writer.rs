@@ -23,15 +23,23 @@ https://cartabinaria.students.cs.unibo.it/en/wiki/web-scraper/course-description
 
 "#.to_owned() + degrees().unwrap().iter().map(|d| {
         let slug = &d.slug;
-        let output_file = output_dir.join(format!("degree-{slug}.adoc"));
-        write(output_file, analyze_degree(d).unwrap()).unwrap();
-        format!(r#"== {}
+        let deg = analyze_degree(d).unwrap();
+        let mut entries: Vec<_> = deg.iter().collect();
+        entries.sort_by_key(|(k, _)| *k);
+        entries.iter().fold("".to_string(), |acc, (year, content)| {
+            let output_file = output_dir.join(format!("degree-{slug}-{year}.adoc"));
+            let _ = write(output_file, content).unwrap();
 
-xref:degree-{}.adoc[web] | link:degree-{}.pdf[PDF] | link:degree-{}.adoc[Asciidoc]
+            format!(r#"{}
+
+== {} ({})
+
+xref:degree-{}-{}.adoc[web] | link:degree-{}-{}.pdf[PDF] | link:degree-{}-{}.adoc[Asciidoc]
 
 "#,
-                d.name, d.slug, d.slug, d.slug
+                acc, d.name, year, d.slug, year, d.slug, year, d.slug, year
             )
+        })
         }).join("\n").as_str();
     if let Err(e) = write(output_dir.join("index.adoc"), index) {
         error!("Could not write index: {e}")

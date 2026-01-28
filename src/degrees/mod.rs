@@ -14,12 +14,14 @@ use reqwest::blocking::get;
 use scraper::{Html, Selector};
 use serde::Deserialize;
 use serde_json::from_reader;
+use std::collections::HashMap;
 use std::fs::File;
 use teachings::get_desc_teaching_page;
 use year::current_academic_year;
 
 lazy_static! {
     static ref TABLE: Selector = Selector::parse("td.title").unwrap();
+    static ref FIRST_LINK: Selector = Selector::parse(".no-bullet > li:first-child > a").unwrap();
     static ref MISSING_TRANSLATIONS: [(String, String); 5] = [
         ("BASI DI DATI".to_string(), "DATABASES".to_string()),
         (
@@ -48,7 +50,7 @@ struct Predegree {
 pub struct Degree {
     pub name: String,
     pub slug: String,
-    pub url: String,
+    pub year_urls: HashMap<u32, String>, // k: year, v: Url
 }
 
 const DEGREES_PATH: &str = "config/degrees.json";
@@ -57,7 +59,55 @@ fn to_lowercase_maybe(s: String, b: bool) -> String {
     if b { s.to_lowercase() } else { s }
 }
 
-fn parse_degree(predegree: &Predegree, academic_year: u32) -> Option<Degree> {
+// Given a university degree (with name and type), return the url of the
+// Course Structures of the last 3 completed years.
+fn get_course_structure_urls(degree_type: &str, degree_name: String) -> HashMap<u32, String> {
+    let end_year = current_academic_year() - 2; // too new, not useful 
+    let start_year = end_year - 1; // get 3 years in total
+
+    (start_year..=end_year)
+        .filter_map(|year| {
+            let url = format!(
+                "https://corsi.unibo.it/{degree_type}/{degree_name}/insegnamenti?year={year}"
+            );
+            eprintln!("Visiting: {url}");
+
+            let res = match get(&url) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("[{year}, {url}] Network error: {e}");
+                    return None;
+                }
+            };
+
+            let res = match res.error_for_status() {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("[{year}, {url}] Server error: {e}");
+                    return None;
+                }
+            };
+
+            let text = res.text().unwrap();
+            let document = Html::parse_document(&text);
+
+            let link = match document.select(&FIRST_LINK).next() {
+                Some(l) => l,
+                None => {
+                    eprintln!("[{year}, {url}] Link not found with the selector");
+                    return None;
+                }
+            };
+
+            let href = link.value().attr("href")?.to_string();
+
+            eprintln!("Got link: {href}");
+            Some((year, href))
+        })
+        .collect()
+}
+
+fn parse_degree(predegree: &Predegree) -> Option<Degree> {
     let Predegree { name, id, code } = predegree;
     if name.is_empty() || id.is_empty() || code.is_empty() {
         None
@@ -79,74 +129,84 @@ fn parse_degree(predegree: &Predegree, academic_year: u32) -> Option<Degree> {
         Some(Degree {
             name: name.to_string(),
             slug: id.to_string(),
-            url: format!(
-                "https://corsi.unibo.it/{degree_type}/{unibo_slug}/insegnamenti/piano/{academic_year}/{code}/000/{academic_year}"
-            ),
+            year_urls: get_course_structure_urls(degree_type, unibo_slug),
         })
     }
 }
 
 fn to_degrees(predegrees: Vec<Predegree>) -> Vec<Degree> {
-    let academic_year = current_academic_year();
     predegrees
         .iter()
-        .filter_map(|predegree| parse_degree(predegree, academic_year))
+        .filter_map(|predegree| parse_degree(predegree))
         .collect()
 }
 
-pub fn analyze_degree(degree: &Degree) -> Result<String> {
+pub fn analyze_degree(degree: &Degree) -> Result<HashMap<u32, String>> {
     let Degree {
         slug: _slug,
         name,
-        url,
+        year_urls,
     } = degree;
-    info!("{name} [{url}]");
-    let res = get(url).map_err(|e| eyre!("\tNetwork error: {e}"))?;
-    let res2 = res
-        .error_for_status()
-        .map_err(|e| eyre!("\tServer error: {e}"))?;
-    let text = res2.text().map_err(|e| eyre!("\tDecoding error: {e}"))?;
-    let document = Html::parse_document(&text);
-    let title_list = document.select(&TABLE);
-    let buf = format!("= {name}\n\n")
-        + title_list
-            .filter_map(|item| {
-                let a_el = item
-                    .children()
-                    .filter_map(|f| f.value().as_element())
-                    .find(|r| r.name() == "a")
-                    .and_then(|a_el| a_el.attr("href"));
-                let temp_name = item.text().join("");
-                let name = temp_name.trim();
-                info!("\tVisiting {name}");
-                match a_el {
-                    Some(link) => {
-                        let teaching_desc = get_desc_teaching_page(link);
-                        match teaching_desc {
-                            Ok(desc) => {
-                                let entry_doc = "\n".to_string() + desc.as_str();
-                                Some(MISSING_TRANSLATIONS.iter().fold(
-                                    entry_doc,
-                                    |entry_doc, (source, replacement)| {
-                                        entry_doc.replace(source, replacement)
-                                    },
-                                ))
+
+    let res = year_urls
+        .iter()
+        .map(|(year, url)| {
+            eprintln!("Analysing {year} link: {url}.");
+            info!("{name} [{url}]");
+            let res = get(url).map_err(|e| eyre!("\tNetwork error: {e}")).unwrap();
+            let res2 = res
+                .error_for_status()
+                .map_err(|e| eyre!("\tServer error: {e}"))
+                .unwrap();
+            let text = res2
+                .text()
+                .map_err(|e| eyre!("\tDecoding error: {e}"))
+                .unwrap();
+            let document = Html::parse_document(&text);
+            let title_list = document.select(&TABLE);
+            let buf = format!("= {name} ({year})\n\n")
+                + title_list
+                    .filter_map(|item| {
+                        let a_el = item
+                            .children()
+                            .filter_map(|f| f.value().as_element())
+                            .find(|r| r.name() == "a")
+                            .and_then(|a_el| a_el.attr("href"));
+                        let temp_name = item.text().join("");
+                        let name = temp_name.trim();
+                        info!("\tVisiting {name}");
+                        match a_el {
+                            Some(link) => {
+                                let teaching_desc = get_desc_teaching_page(link);
+                                match teaching_desc {
+                                    Ok(desc) => {
+                                        let entry_doc = "\n".to_string() + desc.as_str();
+                                        Some(MISSING_TRANSLATIONS.iter().fold(
+                                            entry_doc,
+                                            |entry_doc, (source, replacement)| {
+                                                entry_doc.replace(source, replacement)
+                                            },
+                                        ))
+                                    }
+                                    Err(e) => {
+                                        warn!("\t\tCannot get description: {e:?}");
+                                        None
+                                    }
+                                }
                             }
-                            Err(e) => {
-                                warn!("\t\tCannot get description: {e:?}");
+                            None => {
+                                warn!("\t\tMissing link: {name}");
                                 None
                             }
                         }
-                    }
-                    None => {
-                        warn!("\t\tMissing link: {name}");
-                        None
-                    }
-                }
-            })
-            .join("")
-            .as_str();
-    Ok(buf)
+                    })
+                    .join("")
+                    .as_str();
+            (*year, buf)
+        })
+        .collect();
+
+    Ok(res)
 }
 
 pub fn degrees() -> Result<Vec<Degree>> {
