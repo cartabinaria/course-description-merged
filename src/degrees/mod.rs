@@ -70,38 +70,15 @@ fn get_course_structure_urls(degree_type: &str, degree_name: String) -> HashMap<
             let url = format!(
                 "https://corsi.unibo.it/{degree_type}/{degree_name}/insegnamenti?year={year}"
             );
-            eprintln!("Visiting: {url}");
+            info!("Visiting: {url}");
 
-            let res = match get(&url) {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("[{year}, {url}] Network error: {e}");
-                    return None;
-                }
-            };
-
-            let res = match res.error_for_status() {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("[{year}, {url}] Server error: {e}");
-                    return None;
-                }
-            };
-
-            let text = res.text().unwrap();
+            let res = get(&url).ok()?.error_for_status().ok()?;
+            let text = res.text().ok()?;
             let document = Html::parse_document(&text);
-
-            let link = match document.select(&FIRST_LINK).next() {
-                Some(l) => l,
-                None => {
-                    eprintln!("[{year}, {url}] Link not found with the selector");
-                    return None;
-                }
-            };
-
+            let link = document.select(&FIRST_LINK).next()?;
             let href = link.value().attr("href")?.to_string();
 
-            eprintln!("Got link: {href}");
+            info!("Got link: {href}");
             Some((year, href))
         })
         .collect()
@@ -143,7 +120,7 @@ fn to_degrees(predegrees: Vec<Predegree>) -> Vec<Degree> {
 
 pub fn analyze_degree(degree: &Degree) -> Result<HashMap<u32, String>> {
     let Degree {
-        slug: _slug,
+        slug,
         name,
         year_urls,
     } = degree;
@@ -151,8 +128,7 @@ pub fn analyze_degree(degree: &Degree) -> Result<HashMap<u32, String>> {
     let res = year_urls
         .iter()
         .map(|(year, url)| {
-            eprintln!("Analysing {year} link: {url}.");
-            info!("{name} [{url}]");
+            info!("Analysing {year} link: {url}.");
             let res = get(url).map_err(|e| eyre!("\tNetwork error: {e}")).unwrap();
             let res2 = res
                 .error_for_status()
@@ -177,7 +153,7 @@ pub fn analyze_degree(degree: &Degree) -> Result<HashMap<u32, String>> {
                         info!("\tVisiting {name}");
                         match a_el {
                             Some(link) => {
-                                let teaching_desc = get_desc_teaching_page(link);
+                                let teaching_desc = get_desc_teaching_page(slug, year, link);
                                 match teaching_desc {
                                     Ok(desc) => {
                                         let entry_doc = "\n".to_string() + desc.as_str();

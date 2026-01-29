@@ -19,6 +19,7 @@ lazy_static::lazy_static! {
         ("*".to_string(), "Readings".to_string())
     ]
     .into();
+    static ref PROF: Selector = Selector::parse("div.line:nth-child(1) > ul:nth-child(1) > li:nth-child(1) > a:nth-child(2)").unwrap();
 }
 
 fn get_eng_url(url: &str) -> Result<String> {
@@ -32,7 +33,7 @@ fn get_eng_url(url: &str) -> Result<String> {
     }
 }
 
-pub fn get_desc_teaching_page(url: &str) -> Result<String> {
+pub fn get_desc_teaching_page(slug: &String, year: &u32, url: &str) -> Result<String> {
     let eng_url_temp = get_eng_url(url)?;
     let start = eng_url_temp.find("http").unwrap_or(0);
     let tmp = eng_url_temp.substring(start, eng_url_temp.len());
@@ -40,6 +41,12 @@ pub fn get_desc_teaching_page(url: &str) -> Result<String> {
     let teaching_url = tmp.substring(0, end);
     let eng_page = get(teaching_url)?.text()?;
     let document = Html::parse_document(&eng_page);
+    // let teacher = document
+    //     .select(&PROF)
+    //     .next()
+    //     .ok_or(eyre!("Cannot parse professor name"))?
+    //     .text()
+    //     .join("");
     let teaching_title = document
         .select(&TITLE)
         .next()
@@ -81,9 +88,14 @@ pub fn get_desc_teaching_page(url: &str) -> Result<String> {
         .filter(|item| !item.is_empty())
         .join("\n\n");
     Ok(format!(
-        "\n== {}[{}]\n{}",
+        "\n== {}[{}]\n\nlink:degree-{}-{}.pdf[PDF], xref:degree-{}-{}.adoc[ADOC].\n\n{}", // Professor: {}
         teaching_url,
         teaching_title.as_str(),
+        slug,
+        *year,
+        slug,
+        *year,
+        // teacher,
         filtered_description.trim()
     ))
 }
