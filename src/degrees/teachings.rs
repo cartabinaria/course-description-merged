@@ -2,38 +2,48 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use eyre::{Result, eyre};
 use itertools::Itertools;
 use reqwest::blocking::get;
 use scraper::{Html, Selector};
 use std::collections::HashMap;
+use std::error::Error;
+use std::sync::LazyLock;
 use substring::Substring;
 
-lazy_static::lazy_static! {
-    static ref TITLE: Selector = Selector::parse("div#u-content-intro>h1").unwrap();
-    static ref LANG: Selector = Selector::parse("li.language-en").unwrap();
-    static ref DESC: Selector = Selector::parse("div.description-text").unwrap();
-    static ref DESC_END_MARKER: HashMap<String,String> = [
+static TITLE: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("div#u-content-intro>h1").unwrap());
+static LANG: LazyLock<Selector> = LazyLock::new(|| Selector::parse("li.language-en").unwrap());
+static DESC: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("div.description-text").unwrap());
+static DESC_END_MARKER: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
+    [
         ("Numerical Computing".to_string(), "Teaching".to_string()),
         ("History of Informatics".to_string(), "Office".to_string()),
-        ("*".to_string(), "Readings".to_string())
+        ("*".to_string(), "Readings".to_string()),
     ]
-    .into();
-    static ref PROF: Selector = Selector::parse("div.line:nth-child(1) > ul:nth-child(1) > li:nth-child(1) > a:nth-child(2)").unwrap();
-}
+    .into()
+});
+// static PROF: LazyLock<Selector> = LazyLock::new(|| {
+//     Selector::parse("div.line:nth-child(1) > ul:nth-child(1) > li:nth-child(1) > a:nth-child(2)")
+//         .unwrap()
+// });
 
-fn get_eng_url(url: &str) -> Result<String> {
+fn get_eng_url(url: &str) -> Result<String, Box<dyn Error>> {
     if url.is_empty() {
         Ok("".to_string())
     } else {
         let res = get(url)?.text()?;
         let document = Html::parse_document(&res);
         let link_ite = document.select(&LANG).map(|x| x.inner_html()).next();
-        link_ite.ok_or(eyre!("Cannot get english url"))
+        link_ite.ok_or("Error: Cannot get english url".into())
     }
 }
 
-pub fn get_desc_teaching_page(slug: &String, year: &u32, url: &str) -> Result<String> {
+pub fn get_desc_teaching_page(
+    slug: &String,
+    year: &u32,
+    url: &str,
+) -> Result<String, Box<dyn Error>> {
     let eng_url_temp = get_eng_url(url)?;
     let start = eng_url_temp.find("http").unwrap_or(0);
     let tmp = eng_url_temp.substring(start, eng_url_temp.len());
@@ -50,13 +60,13 @@ pub fn get_desc_teaching_page(slug: &String, year: &u32, url: &str) -> Result<St
     let teaching_title = document
         .select(&TITLE)
         .next()
-        .ok_or(eyre!("Cannot parse teaching title"))?
+        .ok_or("Cannot parse teaching title")?
         .text()
         .join("");
     let full_description = document
         .select(&DESC)
         .next()
-        .ok_or(eyre!("Cannot parse teaching description"))?
+        .ok_or("Cannot parse teaching description")?
         .text()
         .join("");
     let i = full_description
@@ -79,9 +89,7 @@ pub fn get_desc_teaching_page(slug: &String, year: &u32, url: &str) -> Result<St
     let filtered_description = full_description
         .substring(
             i,
-            f.ok_or(eyre!(
-                "No description end marker defined for this page content"
-            ))? - 2,
+            f.ok_or("No description end marker defined for this page content")? - 2,
         )
         .split('\n')
         .map(str::trim)

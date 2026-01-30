@@ -7,13 +7,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 mod degrees;
-mod logging;
 mod writer;
 
-use logging::setup;
 use writer::write_all;
 
 fn main() {
-    setup();
     write_all();
 }

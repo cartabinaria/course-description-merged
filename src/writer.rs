@@ -1,6 +1,5 @@
 use crate::degrees::{analyze_degree, degrees};
 use itertools::Itertools;
-use log::error;
 use std::{
     fs::{create_dir, write},
     path::Path,
@@ -28,7 +27,7 @@ https://cartabinaria.students.cs.unibo.it/en/wiki/web-scraper/course-description
         entries.sort_by_key(|(k, _)| *k);
         entries.iter().fold("".to_string(), |acc, (year, content)| {
             let output_file = output_dir.join(format!("degree-{slug}-{year}.adoc"));
-            let _ = write(output_file, content).unwrap();
+            write(output_file, content).unwrap();
 
             format!(r#"{}
 
@@ -42,6 +41,6 @@ xref:degree-{}-{}.adoc[web] | link:degree-{}-{}.pdf[PDF] | link:degree-{}-{}.ado
         })
         }).join("\n").as_str();
     if let Err(e) = write(output_dir.join("index.adoc"), index) {
-        error!("Could not write index: {e}")
+        eprintln!("Could not write index: {e}")
     };
 }
