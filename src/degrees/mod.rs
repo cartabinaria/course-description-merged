@@ -5,40 +5,40 @@
 pub mod teachings;
 pub mod year;
 
-use eyre::{Result, eyre};
 use itertools::Itertools;
-use lazy_static::lazy_static;
-use log::{info, warn};
 use regex::Regex;
 use reqwest::blocking::get;
 use scraper::{Html, Selector};
 use serde::Deserialize;
 use serde_json::from_reader;
 use std::collections::HashMap;
+use std::error::Error;
 use std::fs::File;
+use std::sync::LazyLock;
 use teachings::get_desc_teaching_page;
 use year::current_academic_year;
 
-lazy_static! {
-    static ref TABLE: Selector = Selector::parse("td.title").unwrap();
-    static ref FIRST_LINK: Selector = Selector::parse(".no-bullet > li:first-child > a").unwrap();
-    static ref MISSING_TRANSLATIONS: [(String, String); 5] = [
+static TABLE: LazyLock<Selector> = LazyLock::new(|| Selector::parse("td.title").unwrap());
+static FIRST_LINK: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse(".no-bullet > li:first-child > a").unwrap());
+static MISSING_TRANSLATIONS: LazyLock<[(String, String); 5]> = LazyLock::new(|| {
+    [
         ("BASI DI DATI".to_string(), "DATABASES".to_string()),
         (
             "INTRODUZIONE ALL'APPRENDIMENTO AUTOMATICO".to_string(),
-            "Introduction to machine learning".to_string()
+            "Introduction to machine learning".to_string(),
         ),
         ("FONDAMENTI DI".to_string(), "".to_string()),
         (
             "Learning outcomes".to_string(),
-            "=== Learning outcomes".to_string()
+            "=== Learning outcomes".to_string(),
         ),
         (
             "Teaching contents".to_string(),
-            "=== Teaching contents".to_string()
-        )
-    ];
-}
+            "=== Teaching contents".to_string(),
+        ),
+    ]
+});
 
 #[derive(Deserialize, Debug, Clone)]
 struct Predegree {
@@ -64,21 +64,19 @@ fn to_lowercase_maybe(s: String, b: bool) -> String {
 fn get_course_structure_urls(degree_type: &str, degree_name: String) -> HashMap<u32, String> {
     let end_year = current_academic_year() - 2; // too new, not useful 
     let start_year = end_year - 1; // get 3 years in total
-
     (start_year..=end_year)
         .filter_map(|year| {
             let url = format!(
                 "https://corsi.unibo.it/{degree_type}/{degree_name}/insegnamenti?year={year}"
             );
-            info!("Visiting: {url}");
+            eprintln!("Visiting: {url}");
 
             let res = get(&url).ok()?.error_for_status().ok()?;
             let text = res.text().ok()?;
             let document = Html::parse_document(&text);
             let link = document.select(&FIRST_LINK).next()?;
             let href = link.value().attr("href")?.to_string();
-
-            info!("Got link: {href}");
+            eprintln!("Got link: {href}");
             Some((year, href))
         })
         .collect()
@@ -112,13 +110,10 @@ fn parse_degree(predegree: &Predegree) -> Option<Degree> {
 }
 
 fn to_degrees(predegrees: Vec<Predegree>) -> Vec<Degree> {
-    predegrees
-        .iter()
-        .filter_map(|predegree| parse_degree(predegree))
-        .collect()
+    predegrees.iter().filter_map(parse_degree).collect()
 }
 
-pub fn analyze_degree(degree: &Degree) -> Result<HashMap<u32, String>> {
+pub fn analyze_degree(degree: &Degree) -> Result<HashMap<u32, String>, Box<dyn Error>> {
     let Degree {
         slug,
         name,
@@ -128,15 +123,17 @@ pub fn analyze_degree(degree: &Degree) -> Result<HashMap<u32, String>> {
     let res = year_urls
         .iter()
         .map(|(year, url)| {
-            info!("Analysing {year} link: {url}.");
-            let res = get(url).map_err(|e| eyre!("\tNetwork error: {e}")).unwrap();
+            eprintln!("Analysing {year} link: {url}");
+            let res = get(url)
+                .map_err(|e| format!("\tNetwork error: {e}"))
+                .unwrap();
             let res2 = res
                 .error_for_status()
-                .map_err(|e| eyre!("\tServer error: {e}"))
+                .map_err(|e| format!("\tServer error: {e}"))
                 .unwrap();
             let text = res2
                 .text()
-                .map_err(|e| eyre!("\tDecoding error: {e}"))
+                .map_err(|e| format!("\tDecoding error: {e}"))
                 .unwrap();
             let document = Html::parse_document(&text);
             let title_list = document.select(&TABLE);
@@ -150,7 +147,7 @@ pub fn analyze_degree(degree: &Degree) -> Result<HashMap<u32, String>> {
                             .and_then(|a_el| a_el.attr("href"));
                         let temp_name = item.text().join("");
                         let name = temp_name.trim();
-                        info!("\tVisiting {name}");
+                        eprintln!("\tVisiting {name}");
                         match a_el {
                             Some(link) => {
                                 let teaching_desc = get_desc_teaching_page(slug, year, link);
@@ -165,13 +162,13 @@ pub fn analyze_degree(degree: &Degree) -> Result<HashMap<u32, String>> {
                                         ))
                                     }
                                     Err(e) => {
-                                        warn!("\t\tCannot get description: {e:?}");
+                                        eprintln!("\t\tWARN: Cannot get description: {e:?}");
                                         None
                                     }
                                 }
                             }
                             None => {
-                                warn!("\t\tMissing link: {name}");
+                                eprintln!("\t\tWARN: Missing link: {name}");
                                 None
                             }
                         }
@@ -185,12 +182,8 @@ pub fn analyze_degree(degree: &Degree) -> Result<HashMap<u32, String>> {
     Ok(res)
 }
 
-pub fn degrees() -> Result<Vec<Degree>> {
-    match File::open(DEGREES_PATH) {
-        Ok(file) => match from_reader(file) {
-            Ok(json) => Ok(to_degrees(json)),
-            Err(error) => Err(eyre!("Parsing {DEGREES_PATH}: {error:?}")),
-        },
-        Err(error) => Err(eyre!("Reading {DEGREES_PATH:?}: {error:?}")),
-    }
+pub fn degrees() -> Result<Vec<Degree>, Box<dyn Error>> {
+    let file = File::open(DEGREES_PATH)?;
+    let json = from_reader(file)?;
+    Ok(to_degrees(json))
 }
