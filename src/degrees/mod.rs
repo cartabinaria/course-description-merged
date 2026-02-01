@@ -214,8 +214,7 @@ fn render_course(
     eprintln!("\tVisiting {name}");
     let res = a_el
         .ok_or(format!("\t\tWARN: Missing link: {name}"))
-        .map(|url| scrape_link(url, degree_slug, year))
-        .flatten();
+        .and_then(|url| scrape_link(url, degree_slug, year));
     result_to_option_with_print(res)
 }
 
