@@ -9,8 +9,17 @@
 mod degrees;
 mod writer;
 
-use writer::write_all;
+use writer::{write_folder, write_index_and_degrees};
 
+/// Entrypoint of the application. Creates an output folder populated with
+/// multiple pages for the scraped content, as well as an index file listing
+/// said pages. Will panic if:
+/// - the output folder does not exist yet, and it cannot be created;
+/// - the local list of degrees to be scraped cannot be read from disk;
+/// - the scraping fails;
+/// - any of the scraped pages cannot be written on disk;
+/// - the index cannot be written on disk.
 fn main() {
-    write_all();
+    write_folder();
+    write_index_and_degrees();
 }
