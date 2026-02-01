@@ -5,16 +5,19 @@
 use itertools::Itertools;
 use reqwest::blocking::get;
 use scraper::{Html, Selector};
-use std::collections::HashMap;
-use std::error::Error;
-use std::sync::LazyLock;
+use std::{collections::HashMap, error::Error, sync::LazyLock};
 use substring::Substring;
 
+/// Selector for the teaching title
 static TITLE: LazyLock<Selector> =
     LazyLock::new(|| Selector::parse("div#u-content-intro>h1").unwrap());
+/// Selector for the teaching language
 static LANG: LazyLock<Selector> = LazyLock::new(|| Selector::parse("li.language-en").unwrap());
+/// Selector for the teaching description
 static DESC: LazyLock<Selector> =
     LazyLock::new(|| Selector::parse("div.description-text").unwrap());
+/// A dictionary specifying, for each teaching, a keyword marking the end of its
+/// description.
 static DESC_END_MARKER: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
     [
         ("Numerical Computing".to_string(), "Teaching".to_string()),
@@ -28,6 +31,7 @@ static DESC_END_MARKER: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
 //         .unwrap()
 // });
 
+/// Scrapes a webpage to look for the English counterpart.
 fn get_eng_url(url: &str) -> Result<String, Box<dyn Error>> {
     if url.is_empty() {
         Ok("".to_string())
@@ -39,6 +43,7 @@ fn get_eng_url(url: &str) -> Result<String, Box<dyn Error>> {
     }
 }
 
+/// Scrapes a single teaching page.
 pub fn get_desc_teaching_page(
     slug: &String,
     year: &u32,
