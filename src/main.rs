@@ -6,43 +6,20 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use degrees::degrees;
-use log::error;
-use std::{fmt::Write, fs};
+mod degrees;
+mod writer;
 
-pub mod degrees;
+use writer::{write_folder, write_index_and_degrees};
 
+/// Entrypoint of the application. Creates an output folder populated with
+/// multiple pages for the scraped content, as well as an index file listing
+/// said pages. Will panic if:
+/// - the output folder does not exist yet, and it cannot be created;
+/// - the local list of degrees to be scraped cannot be read from disk;
+/// - the scraping fails;
+/// - any of the scraped pages cannot be written on disk;
+/// - the index cannot be written on disk.
 fn main() {
-    let env = env_logger::Env::default().default_filter_or("info");
-    env_logger::Builder::from_env(env).init();
-    if let Err(e) = color_eyre::install() {
-        error!("Eyre setup: {e}");
-        return;
-    };
-    let output_dir = std::path::Path::new("output");
-    if !output_dir.exists() {
-        if let Err(e) = fs::create_dir(output_dir) {
-            error!("Output dir creation: {e}");
-            return;
-        };
-    }
-    let mut index = "= Unified Course Descriptions for Some UNIBO Degrees\n\nhttps://cartabinaria.students.cs.unibo.it/en/wiki/web-scraper/course-description-merged/[Documentation]\n\n".to_owned();
-    if let Some(deg) = degrees() {
-        for d in deg {
-            degrees::analyze_degree(&d, output_dir);
-            if let Err(e) = writeln!(
-                index,
-                "== {}\n\nxref:degree-{}.adoc[web] | link:degree-{}.pdf[PDF] | link:degree-{}.adoc[Asciidoc]\n\n",
-                d.name, d.slug, d.slug, d.slug
-            ) {
-                error!("Could not append {}: {}", d.name, e);
-            };
-        }
-    } else {
-        error!("Could not load degrees");
-        return;
-    }
-    if let Err(e) = fs::write(output_dir.join("index.adoc"), index) {
-        error!("Could not write index: {e}")
-    };
+    write_folder();
+    write_index_and_degrees();
 }
