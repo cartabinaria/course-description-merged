@@ -3,6 +3,8 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 name: Webscraping to Pages
+env:
+  RUSTFLAGS: "-Dwarnings"
 on:
   push:
     branches:
@@ -41,15 +43,9 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - uses: actions-rs/cargo@v1
-        with:
-          command: clippy --no-deps
-      - uses: actions-rs/cargo@v1
-        with:
-          command: fix
-      - uses: actions-rs/cargo@v1
-        with:
-          command: fmt
+      - run: cargo check
+      - run: cargo clippy --no-deps
+      - run: cargo fmt --check
   scraper:
     runs-on: ubuntu-latest
     name: Run project
