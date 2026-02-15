@@ -49,7 +49,7 @@ jobs:
   scraper:
     runs-on: ubuntu-latest
     name: Run project
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'schedule'
     steps:
       - uses: actions/checkout@v6
         with:
