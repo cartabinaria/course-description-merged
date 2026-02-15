@@ -3,9 +3,14 @@
 //
 // SPDX-License-Identifier: CC-BY-3.0
 
-= course-description-merged
+= `course-description-merged`
 
-Un _webscraper_ che, quotidianamente, raccoglie tutti i corsi con descrizione e
-link alla pagina del corso. Scopri di più sulla
-https://cartabinaria.students.cs.unibo.it/wiki/web-scraper/course-description-merged/[wiki
-di CartaBinaria].
+When applying for M.Sc. and Ph.D. programmes, you are often asked to send a
+document describing all courses you are to take as part of your current
+programme. However, Unibo does not provide students with such a report.
+
+This project is a _webscraper_ solving this issue.
+
+- [scraped content](https://cartabinaria.github.io/course-description-merged/)
+- [wiki
+  page](https://cartabinaria.students.cs.unibo.it/en/wiki/web-scraper/course-description-merged/)
