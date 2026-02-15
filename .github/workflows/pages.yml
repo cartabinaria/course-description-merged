@@ -2,9 +2,9 @@
 # SPDX-FileCopyrightText: 2023 Eyad Issa <eyadlorenzo@gmail.com>
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
-
 name: Webscraping to Pages
-
+env:
+  RUSTFLAGS: "-Dwarnings"
 on:
   push:
     branches:
@@ -13,33 +13,28 @@ on:
     branches:
       - main
   schedule:
-    - cron: "0 0 1 * *"
+    - cron: "0 0 1 9 *"
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
-
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
   contents: read
   pages: write
   id-token: write
-
 # Allow one concurrent deployment
 concurrency:
   group: "pages"
   cancel-in-progress: true
-
 jobs:
-  scraper:
+  check:
     runs-on: ubuntu-latest
-    name: Run project
+    name: Check source
+    if: github.ref != 'refs/heads/main'
     steps:
       - uses: actions/checkout@v6
-        with:
-          submodules: recursive
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-
       - uses: actions/cache@v5
         with:
           path: |
@@ -48,34 +43,41 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - uses: actions-rs/cargo@v1
+      - run: cargo check
+      - run: cargo clippy --no-deps
+      - run: cargo fmt --check
+  scraper:
+    runs-on: ubuntu-latest
+    name: Run project
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v6
         with:
-          command: clippy --no-deps
-
-      - uses: actions-rs/cargo@v1
+          submodules: recursive
+      - uses: actions-rs/toolchain@v1
         with:
-          command: fix
-
-      - uses: actions-rs/cargo@v1
+          toolchain: stable
+      - uses: actions/cache@v5
         with:
-          command: fmt
-
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - uses: actions-rs/cargo@v1
         with:
           command: run
-          args: --release
-
       - name: Generate artifact
         uses: actions/upload-artifact@v6
         with:
           name: courses
           path: ./output/*.adoc
-
   asciidoc:
     name: Build web page
     runs-on: ubuntu-latest
     needs: scraper
+    if: github.ref == 'refs/heads/main'
     container:
       image: ghcr.io/cartabinaria/build-image:latest
     steps:
@@ -84,19 +86,15 @@ jobs:
         with:
           name: courses
           path: "."
-
       - name: Generate HTML
         run: asciidoctor "*.adoc"
-
       - name: Generate PDF
         run: asciidoctor-pdf "*.adoc"
-
       - name: Generate site artifact
         uses: actions/upload-artifact@v6
         with:
           name: site
           path: "."
-
   pages:
     name: Deploy to GitHub Pages
     environment:
@@ -106,21 +104,17 @@ jobs:
     needs: asciidoc
     if: github.ref == 'refs/heads/main'
     steps:
-
       - name: Download site artifact
         uses: actions/download-artifact@v7
         with:
           name: site
           path: site
-
       - name: Setup Pages
         uses: actions/configure-pages@v5
-
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
         with:
           path: site
-
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
