@@ -16,7 +16,7 @@ updates:
   - package-ecosystem: "gitsubmodule"
     directory: "/"
     allow:
-      - dependency-name: "json/config"
+      - dependency-name: "config"
     schedule:
       interval: "daily"
   - package-ecosystem: "github-actions"
