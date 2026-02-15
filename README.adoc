@@ -11,6 +11,5 @@ programme. However, Unibo does not provide students with such a report.
 
 This project is a _webscraper_ solving this issue.
 
-- [scraped content](https://cartabinaria.github.io/course-description-merged/)
-- [wiki
-  page](https://cartabinaria.students.cs.unibo.it/en/wiki/web-scraper/course-description-merged/)
+- link:https://cartabinaria.github.io/course-description-merged/[Scraped Content]
+- link:https://cartabinaria.students.cs.unibo.it/en/wiki/web-scraper/course-description-merged/[Wiki]
