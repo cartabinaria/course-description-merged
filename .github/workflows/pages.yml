@@ -69,7 +69,7 @@ jobs:
         with:
           command: run
       - name: Generate artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: courses
           path: ./output/*.adoc
@@ -91,7 +91,7 @@ jobs:
       - name: Generate PDF
         run: asciidoctor-pdf "*.adoc"
       - name: Generate site artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: site
           path: "."
