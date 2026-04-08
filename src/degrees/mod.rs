@@ -6,14 +6,13 @@ mod teachings;
 mod year;
 
 use itertools::Itertools;
+use rayon::prelude::*;
 use regex::Regex;
 use reqwest::blocking::get;
 use scraper::{Html, Selector};
 use serde::Deserialize;
 use serde_json::from_reader;
-use std::{
-    collections::HashMap, error::Error, fmt::Display, fs::File, iter::repeat, sync::LazyLock,
-};
+use std::{collections::HashMap, error::Error, fmt::Display, fs::File, sync::LazyLock};
 use teachings::get_desc_teaching_page;
 use year::current_academic_year;
 
@@ -109,6 +108,7 @@ fn get_degree_structure_urls(degree_level: &str, degree_name: String) -> HashMap
     };
 
     (first_scraped_year..previous_academic_year)
+        .into_par_iter()
         .filter_map(get_degree_structure_url)
         .collect()
 }
@@ -198,24 +198,18 @@ fn result_to_option_with_print<T, E: Display>(r: Result<T, E>) -> Option<T> {
     }
 }
 
-/// Renders a single course given the corresponding HTML in the degree structure
-/// webpage. To do so, it looks for a link to the course page in the HTML, and
-/// scrapes that.
-fn render_course(
-    (course_html, (degree_slug, year)): (scraper::ElementRef<'_>, (&String, &u32)),
-) -> Option<String> {
+/// It looks for a link to the course page and course name in the HTML, and
+/// returns them
+fn get_course_data(course_html: scraper::ElementRef<'_>) -> Option<(String, String)> {
     let a_el = course_html
         .children()
         .filter_map(|f| f.value().as_element())
         .find(|r| r.name() == "a")
-        .and_then(|a_el| a_el.attr("href"));
+        .and_then(|a_el| a_el.attr("href"))?
+        .to_string();
     let temp_name = course_html.text().join("");
-    let name = temp_name.trim();
-    eprintln!("\tVisiting {name}");
-    let res = a_el
-        .ok_or(format!("\t\tWARN: Missing link: {name}"))
-        .and_then(|url| scrape_link(url, degree_slug, year));
-    result_to_option_with_print(res)
+    let name = temp_name.trim().to_string();
+    Some((a_el, name))
 }
 
 /// Scrapes a yearly degree structure URL, returning textual content for it.
@@ -230,11 +224,18 @@ fn analyze_year_with_error(
     let text = res.text().map_err(|e| format!("\tDecoding error: {e}"))?;
     let document = Html::parse_document(&text);
     let title = format!("= {degree_name} ({year})\n\n");
-    let courses = document
+    let courses_data: Vec<_> = document
         .select(&TABLE)
-        .zip(repeat((degree_slug, year)))
-        .filter_map(render_course)
-        .join("");
+        .filter_map(get_course_data)
+        .collect();
+
+    let courses = courses_data
+        .into_par_iter()
+        .filter_map(|(url, name)| {
+            eprintln!("\tVisiting {name}");
+            scrape_link(&url, degree_slug, year).ok()
+        })
+        .collect::<String>();
     Ok((*year, title + courses.as_str()))
 }
 
@@ -254,9 +255,8 @@ pub fn analyze_degree(degree: &Degree) -> Result<HashMap<u32, String>, Box<dyn E
         year_urls,
     } = degree;
     let res = year_urls
-        .iter()
-        .zip(repeat((slug, name)))
-        .filter_map(analyze_year)
+        .par_iter()
+        .filter_map(|(year, url)| analyze_year(((year, url), (slug, name))))
         .collect();
     Ok(res)
 }
