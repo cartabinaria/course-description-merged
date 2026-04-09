@@ -23,15 +23,6 @@ use writer::{write_folder, write_index_and_degrees};
 fn main() {
     Builder::from_env(Env::default().default_filter_or("info")).init();
 
-    //use std::time::Instant;
-    //let now = Instant::now();
-
-    // Code block to measure.
-    //{
     write_folder();
     write_index_and_degrees();
-    //}
-
-    //let elapsed = now.elapsed();
-    //println!("Elapsed: {:.2?}", elapsed);
 }

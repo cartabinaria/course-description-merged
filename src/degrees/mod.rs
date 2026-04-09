@@ -2,13 +2,15 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+mod retry;
 mod teachings;
 mod year;
 
 use itertools::Itertools;
+use log::{debug, error, info};
 use rayon::prelude::*;
 use regex::Regex;
-use reqwest::blocking::get;
+use retry::get_status_checked_with_retry;
 use scraper::{Html, Selector};
 use serde::Deserialize;
 use serde_json::from_reader;
@@ -96,14 +98,40 @@ fn get_degree_structure_urls(degree_level: &str, degree_name: String) -> HashMap
     let get_degree_structure_url = |year: u32| -> Option<(u32, String)> {
         let url =
             format!("https://corsi.unibo.it/{degree_level}/{degree_name}/insegnamenti?year={year}");
-        eprintln!("Visiting: {url}");
+        debug!(
+            "[degree_level={degree_level} degree_unibo_slug={degree_name} year={year}] Visiting: {url}"
+        );
 
-        let res = get(&url).ok()?.error_for_status().ok()?;
-        let text = res.text().ok()?;
+        let res = match get_status_checked_with_retry(&url) {
+            Ok(res) => res,
+            Err(err) => {
+                if let Some(status) = err.status() {
+                    error!(
+                        "[degree_level={degree_level} degree_unibo_slug={degree_name} year={year}] HTTP {status} while getting degree structure URL: {url}"
+                    );
+                } else {
+                    error!(
+                        "[degree_level={degree_level} degree_unibo_slug={degree_name} year={year}] Network/request error while getting degree structure URL: {url}; {err}"
+                    );
+                }
+                return None;
+            }
+        };
+        let text = match res.text() {
+            Ok(text) => text,
+            Err(err) => {
+                error!(
+                    "[degree_level={degree_level} degree_unibo_slug={degree_name} year={year}] Response decoding error for degree structure URL {url}: {err}"
+                );
+                return None;
+            }
+        };
         let document = Html::parse_document(&text);
         let link = document.select(&FIRST_LINK).next()?;
         let href = link.value().attr("href")?.to_string();
-        eprintln!("Got link: {href}");
+        debug!(
+            "[degree_level={degree_level} degree_unibo_slug={degree_name} year={year}] Got link: {href}"
+        );
         Some((year, href))
     };
 
@@ -164,7 +192,7 @@ fn parse_degree(predegree: &Predegree) -> Option<Degree> {
 /// not be part of the output. To perform the conversion, some webscraping is
 /// necessary.
 fn to_degrees(predegrees: Vec<Predegree>) -> Vec<Degree> {
-    predegrees.iter().filter_map(parse_degree).collect()
+    predegrees.par_iter().filter_map(parse_degree).collect()
 }
 
 /// Performs a replacement in a string
@@ -192,7 +220,7 @@ fn result_to_option_with_print<T, E: Display>(r: Result<T, E>) -> Option<T> {
     match r {
         Ok(r) => Some(r),
         Err(e) => {
-            eprintln!("{e}");
+            error!("{e}");
             None
         }
     }
@@ -216,12 +244,23 @@ fn get_course_data(course_html: scraper::ElementRef<'_>) -> Option<(String, Stri
 fn analyze_year_with_error(
     ((year, url), (degree_slug, degree_name)): ((&u32, &String), (&String, &String)),
 ) -> Result<(u32, String), String> {
-    eprintln!("Analysing {year} link: {url}");
-    let res = get(url).map_err(|e| format!("\tNetwork error: {e}"))?;
-    let res = res
-        .error_for_status()
-        .map_err(|e| format!("\tServer error: {e}"))?;
-    let text = res.text().map_err(|e| format!("\tDecoding error: {e}"))?;
+    info!(
+        "[degree_slug={degree_slug} degree_name={degree_name} year={year}] Analysing link: {url}"
+    );
+    let res = get_status_checked_with_retry(url).map_err(|e| {
+        if let Some(status) = e.status() {
+            format!(
+                "[degree_slug={degree_slug} degree_name={degree_name} year={year}] Server error HTTP {status} for {url}: {e}"
+            )
+        } else {
+            format!(
+                "[degree_slug={degree_slug} degree_name={degree_name} year={year}] Network error for {url}: {e}"
+            )
+        }
+    })?;
+    let text = res.text().map_err(|e| {
+        format!("[degree_slug={degree_slug} degree_name={degree_name} year={year}] Decoding error for {url}: {e}")
+    })?;
     let document = Html::parse_document(&text);
     let title = format!("= {degree_name} ({year})\n\n");
     let courses_data: Vec<_> = document
@@ -232,8 +271,18 @@ fn analyze_year_with_error(
     let courses = courses_data
         .into_par_iter()
         .filter_map(|(url, name)| {
-            eprintln!("\tVisiting {name}");
-            scrape_link(&url, degree_slug, year).ok()
+            debug!(
+                "[degree_slug={degree_slug} degree_name={degree_name} year={year} course_name={name}] Visiting teaching link: {url}"
+            );
+            match scrape_link(&url, degree_slug, year) {
+                Ok(content) => Some(content),
+                Err(err) => {
+                    error!(
+                        "[degree_slug={degree_slug} degree_name={degree_name} year={year} course_name={name} course_url={url}] {err}"
+                    );
+                    None
+                }
+            }
         })
         .collect::<String>();
     Ok((*year, title + courses.as_str()))

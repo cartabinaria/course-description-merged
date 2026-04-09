@@ -34,7 +34,7 @@ pub fn get_status_checked_with_retry(url: &str) -> Result<Response, reqwest::Err
                 }
 
                 debug!(
-                    "Retrying request ({attempt}/{RETRY_ATTEMPTS}) in {delay_ms}ms: {url}; {err}"
+                    "[request_url={url} attempt={attempt} max_attempts={RETRY_ATTEMPTS} backoff_ms={delay_ms}] Retrying request due to transient error: {err}"
                 );
                 sleep(Duration::from_millis(delay_ms));
                 delay_ms *= 2;
