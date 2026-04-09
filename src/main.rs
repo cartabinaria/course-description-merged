@@ -9,6 +9,7 @@
 mod degrees;
 mod writer;
 
+use env_logger::{Builder, Env};
 use writer::{write_folder, write_index_and_degrees};
 
 /// Entrypoint of the application. Creates an output folder populated with
@@ -20,6 +21,17 @@ use writer::{write_folder, write_index_and_degrees};
 /// - any of the scraped pages cannot be written on disk;
 /// - the index cannot be written on disk.
 fn main() {
+    Builder::from_env(Env::default().default_filter_or("info")).init();
+
+    //use std::time::Instant;
+    //let now = Instant::now();
+
+    // Code block to measure.
+    //{
     write_folder();
     write_index_and_degrees();
+    //}
+
+    //let elapsed = now.elapsed();
+    //println!("Elapsed: {:.2?}", elapsed);
 }
