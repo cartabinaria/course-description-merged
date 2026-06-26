@@ -82,7 +82,7 @@ jobs:
       image: ghcr.io/cartabinaria/build-image:latest
     steps:
       - name: Download source artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: courses
           path: "."
@@ -105,7 +105,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - name: Download site artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: site
           path: site
