@@ -31,11 +31,11 @@ jobs:
     name: Check source
     if: github.ref != 'refs/heads/main'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/bin/
@@ -51,13 +51,13 @@ jobs:
     name: Run project
     if: github.ref == 'refs/heads/main' && github.event_name == 'schedule'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/bin/
@@ -69,7 +69,7 @@ jobs:
         with:
           command: run
       - name: Generate artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: courses
           path: ./output/*.adoc
@@ -82,7 +82,7 @@ jobs:
       image: ghcr.io/cartabinaria/build-image:latest
     steps:
       - name: Download source artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: courses
           path: "."
@@ -91,7 +91,7 @@ jobs:
       - name: Generate PDF
         run: asciidoctor-pdf "*.adoc"
       - name: Generate site artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: site
           path: "."
@@ -105,16 +105,16 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - name: Download site artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: site
           path: site
       - name: Setup Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-pages-artifact@v5
         with:
           path: site
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
