@@ -8,7 +8,10 @@ edition = "2024"
 
 [dependencies]
 chrono = { version = "0.4.44", default-features = false, features = ["clock"] }
+env_logger = "0.11.8"
 itertools = "0.15.0"
+log = "0.4.28"
+rayon = "1.11.0"
 regex = "1.12.4"
 reqwest = {version = "0.13", default-features = false, features = ["blocking", "rustls"]}
 scraper = "0.27.0"

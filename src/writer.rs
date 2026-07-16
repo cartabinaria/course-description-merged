@@ -1,5 +1,5 @@
 use crate::degrees::{Degree, analyze_degree, degrees};
-use itertools::Itertools;
+use rayon::prelude::*;
 use std::{
     fs::{create_dir, write},
     path::Path,
@@ -68,7 +68,7 @@ fn compute_index_and_write_degrees() -> String {
 
 https://cartabinaria.students.cs.unibo.it/en/wiki/web-scraper/course-description-merged/[Documentation]
 
-"#.to_owned() + degrees().unwrap().iter().map(analyze_and_write_degree).join("\n").as_str()
+"#.to_owned() + degrees().unwrap().par_iter().map(analyze_and_write_degree).collect::<Vec<String>>().join("\n").as_str()
 }
 
 /// Collects all degrees to be processed from a local config file, scrapes them,

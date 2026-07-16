@@ -2,10 +2,12 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use super::retry::get_status_checked_with_retry;
 use itertools::Itertools;
-use reqwest::blocking::get;
+use log::error;
+use reqwest::Error as ReqwestError;
 use scraper::{Html, Selector};
-use std::{collections::HashMap, error::Error, sync::LazyLock};
+use std::{collections::HashMap, error::Error, io::Error as IoError, sync::LazyLock};
 use substring::Substring;
 
 /// Selector for the teaching title
@@ -26,17 +28,40 @@ static DESC_END_MARKER: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
     ]
     .into()
 });
+
+fn request_error(log_ctx: &str, url: &str, is_lang: &str, e: ReqwestError) -> IoError {
+    let message = e.status().map_or_else(
+        || {
+            format!(
+                "[{log_ctx}] Request error while requesting teaching {}page {url}: {e}",
+                is_lang.to_owned() + " "
+            )
+        },
+        |status| {
+            format!(
+                "[{log_ctx}] HTTP {status} while requesting teaching {}page {url}: {e}",
+                is_lang.to_owned() + " "
+            )
+        },
+    );
+
+    error!("{message}");
+    IoError::other(message)
+}
+
 // static PROF: LazyLock<Selector> = LazyLock::new(|| {
 //     Selector::parse("div.line:nth-child(1) > ul:nth-child(1) > li:nth-child(1) > a:nth-child(2)")
 //         .unwrap()
 // });
 
 /// Scrapes a webpage to look for the English counterpart.
-fn get_eng_url(url: &str) -> Result<String, Box<dyn Error>> {
+fn get_eng_url(url: &str, log_ctx: &str) -> Result<String, Box<dyn Error>> {
     if url.is_empty() {
         Ok("".to_string())
     } else {
-        let res = get(url)?.text()?;
+        let res = get_status_checked_with_retry(url)
+            .map_err(|e| request_error(log_ctx, url, "language", e))?
+            .text()?;
         let document = Html::parse_document(&res);
         let link_ite = document.select(&LANG).map(|x| x.inner_html()).next();
         link_ite.ok_or("Error: Cannot get english url".into())
@@ -49,12 +74,15 @@ pub fn get_desc_teaching_page(
     year: &u32,
     url: &str,
 ) -> Result<String, Box<dyn Error>> {
-    let eng_url_temp = get_eng_url(url)?;
+    let log_ctx = format!("degree_slug={slug} year={year} teaching_listing_url={url}");
+    let eng_url_temp = get_eng_url(url, &log_ctx)?;
     let start = eng_url_temp.find("http").unwrap_or(0);
     let tmp = eng_url_temp.substring(start, eng_url_temp.len());
     let end = tmp.find('\"').unwrap_or(0);
     let teaching_url = tmp.substring(0, end);
-    let eng_page = get(teaching_url)?.text()?;
+    let eng_page = get_status_checked_with_retry(teaching_url)
+        .map_err(|e| request_error(&log_ctx, teaching_url, "", e))?
+        .text()?;
     let document = Html::parse_document(&eng_page);
     // let teacher = document
     //     .select(&PROF)

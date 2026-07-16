@@ -3,4 +3,4 @@
 
 [submodule "config"]
 	path = config
-	url = git@github.com:csunibo/config
+	url = git@github.com:cartabinaria/config
