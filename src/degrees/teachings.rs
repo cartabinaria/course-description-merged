@@ -5,6 +5,7 @@
 use super::retry::get_status_checked_with_retry;
 use itertools::Itertools;
 use log::error;
+use reqwest::Error as ReqwestError;
 use scraper::{Html, Selector};
 use std::{collections::HashMap, error::Error, io::Error as IoError, sync::LazyLock};
 use substring::Substring;
@@ -28,6 +29,26 @@ static DESC_END_MARKER: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
     .into()
 });
 
+fn request_error(log_ctx: &str, url: &str, is_lang: &str, e: ReqwestError) -> IoError {
+    let message = e.status().map_or_else(
+        || {
+            format!(
+                "[{log_ctx}] Request error while requesting teaching {}page {url}: {e}",
+                is_lang.to_owned() + " "
+            )
+        },
+        |status| {
+            format!(
+                "[{log_ctx}] HTTP {status} while requesting teaching {}page {url}: {e}",
+                is_lang.to_owned() + " "
+            )
+        },
+    );
+
+    error!("{message}");
+    IoError::other(message)
+}
+
 // static PROF: LazyLock<Selector> = LazyLock::new(|| {
 //     Selector::parse("div.line:nth-child(1) > ul:nth-child(1) > li:nth-child(1) > a:nth-child(2)")
 //         .unwrap()
@@ -38,20 +59,9 @@ fn get_eng_url(url: &str, log_ctx: &str) -> Result<String, Box<dyn Error>> {
     if url.is_empty() {
         Ok("".to_string())
     } else {
-        let res = get_status_checked_with_retry(url).map_err(|e| {
-            let message = if let Some(status) = e.status() {
-                format!(
-                    "[{log_ctx}] HTTP {status} while requesting teaching language page {url}: {e}"
-                )
-            } else {
-                format!(
-                    "[{log_ctx}] Request error while requesting teaching language page {url}: {e}"
-                )
-            };
-            error!("{message}");
-            IoError::other(message)
-        })?;
-        let res = res.text()?;
+        let res = get_status_checked_with_retry(url)
+            .map_err(|e| request_error(log_ctx, url, "language", e))?
+            .text()?;
         let document = Html::parse_document(&res);
         let link_ite = document.select(&LANG).map(|x| x.inner_html()).next();
         link_ite.ok_or("Error: Cannot get english url".into())
@@ -70,20 +80,9 @@ pub fn get_desc_teaching_page(
     let tmp = eng_url_temp.substring(start, eng_url_temp.len());
     let end = tmp.find('\"').unwrap_or(0);
     let teaching_url = tmp.substring(0, end);
-    let eng_page = get_status_checked_with_retry(teaching_url).map_err(|e| {
-        let message = if let Some(status) = e.status() {
-            format!(
-                "[{log_ctx} teaching_page_url={teaching_url}] HTTP {status} while requesting teaching page {teaching_url}: {e}"
-            )
-        } else {
-            format!(
-                "[{log_ctx} teaching_page_url={teaching_url}] Request error while requesting teaching page {teaching_url}: {e}"
-            )
-        };
-        error!("{message}");
-        IoError::other(message)
-    })?;
-    let eng_page = eng_page.text()?;
+    let eng_page = get_status_checked_with_retry(teaching_url)
+        .map_err(|e| request_error(&log_ctx, teaching_url, "", e))?
+        .text()?;
     let document = Html::parse_document(&eng_page);
     // let teacher = document
     //     .select(&PROF)

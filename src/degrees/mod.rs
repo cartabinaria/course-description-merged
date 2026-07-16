@@ -18,10 +18,10 @@ use std::{collections::HashMap, error::Error, fmt::Display, fs::File, sync::Lazy
 use teachings::get_desc_teaching_page;
 use year::current_academic_year;
 
-/// The relative path at which the predregrees are saved.
+/// The relative path at which the pre-degrees are saved.
 const DEGREES_PATH: &str = "config/degrees.json";
 
-/// The number of enrollment years to scrape for each degree.
+/// The number of enrolment years to scrape for each degree.
 const YEARS_PER_DEGREE: u32 = 3;
 
 /// Selector for table titles.
@@ -50,9 +50,23 @@ static MISSING_TRANSLATIONS: LazyLock<[(String, String); 5]> = LazyLock::new(|| 
     ]
 });
 
-/// A predegree represents the metadata on a degree which is already available
+type AcademicYear = u32;
+type Url = String;
+type DegreeSlug = String;
+type DegreeName = String;
+
+type YearUrls = HashMap<AcademicYear, Url>;
+type DegreeStructures = HashMap<AcademicYear, String>;
+
+type CourseLink = Url;
+type CourseName = String;
+type CourseData = (CourseLink, CourseName);
+
+type DegreeAnalysis = (AcademicYear, String);
+
+/// A pre-degree represents the metadata on a degree which is already available
 /// in the `config` submodule. This needs to be preprocessed before becoming the
-/// matdata we require.
+/// metadata we require.
 #[derive(Deserialize, Debug, Clone)]
 struct Predegree {
     /// The unique kebab-case name used by Cartabinaria software to refer to the
@@ -69,21 +83,67 @@ struct Predegree {
 /// cannot be stored in the `config` submodule, as part of it is updated yearly.
 pub struct Degree {
     /// The human-readable name of the degree
-    pub name: String,
+    pub name: DegreeName,
     /// The slug used by webpages on unibo.it
-    pub slug: String,
+    pub slug: DegreeSlug,
     /// For each (recent) academic year, a URL to the description of the courses
     /// of the programme for students enrolled in it. The key represents the
     /// solar year during which the academic year started (recall that academic
     /// years start in September).
-    year_urls: HashMap<u32, String>,
+    year_urls: YearUrls,
+}
+
+fn get_degree_structure_url(
+    degree_level: &str,
+    degree_name: &DegreeSlug,
+    year: AcademicYear,
+) -> Option<(AcademicYear, Url)> {
+    let url =
+        format!("https://corsi.unibo.it/{degree_level}/{degree_name}/insegnamenti?year={year}");
+
+    debug!(
+        "[degree_level={degree_level} degree_unibo_slug={degree_name} year={year}] Visiting: {url}"
+    );
+
+    let text = get_status_checked_with_retry(&url)
+        .inspect_err(|e| {
+            e.status().map_or_else(
+                || error!(
+                    "[degree_level={degree_level} degree_unibo_slug={degree_name} year={year}] Network/request error while getting degree structure URL: {url}; {e}"
+                ),
+                |status| error!(
+                    "[degree_level={degree_level} degree_unibo_slug={degree_name} year={year}] HTTP {status} while getting degree structure URL: {url}"
+                ),
+            );
+        })
+        .ok()?
+        .text()
+        .inspect_err(|e| {
+            error!(
+                "[degree_level={degree_level} degree_unibo_slug={degree_name} year={year}] Response decoding error for degree structure URL {url}: {e}"
+            );
+        })
+        .ok()?;
+
+    let href = Html::parse_document(&text)
+        .select(&FIRST_LINK)
+        .next()?
+        .value()
+        .attr("href")?
+        .to_string();
+
+    debug!(
+        "[degree_level={degree_level} degree_unibo_slug={degree_name} year={year}] Got link: {href}"
+    );
+
+    Some((year, href))
 }
 
 /// Takes a slug used by unibo.it to represent the degree level (usually
 /// "laurea" for a B.Sc., and "magistrale" for a M.Sc.), as well as a slug used
 /// for a degree of such level. Returns the URLs (dictionary values) to the
 /// descriptions of the courses of the programme for students enrolled at
-/// various recent years (diciontary keys, see [YEARS_PER_DEGREE]). The URLs are
+/// various recent years (dictionary keys, see [YEARS_PER_DEGREE]). The URLs are
 /// collected via web scraping. If a URL cannot be collected, it will not be
 /// added to the returned dictionary.
 ///
@@ -91,53 +151,13 @@ pub struct Degree {
 /// degrees. Because you don't usually apply for a M.Sc. in your first and
 /// second year as a B.Sc. student, the current and previous academic years
 /// (with reference to the current system clock) are excluded from the scraping.
-fn get_degree_structure_urls(degree_level: &str, degree_name: String) -> HashMap<u32, String> {
+fn get_degree_structure_urls(degree_level: &str, degree_name: DegreeSlug) -> YearUrls {
     let previous_academic_year = current_academic_year() - 1;
     let first_scraped_year = previous_academic_year - YEARS_PER_DEGREE;
 
-    let get_degree_structure_url = |year: u32| -> Option<(u32, String)> {
-        let url =
-            format!("https://corsi.unibo.it/{degree_level}/{degree_name}/insegnamenti?year={year}");
-        debug!(
-            "[degree_level={degree_level} degree_unibo_slug={degree_name} year={year}] Visiting: {url}"
-        );
-
-        let res = match get_status_checked_with_retry(&url) {
-            Ok(res) => res,
-            Err(err) => {
-                if let Some(status) = err.status() {
-                    error!(
-                        "[degree_level={degree_level} degree_unibo_slug={degree_name} year={year}] HTTP {status} while getting degree structure URL: {url}"
-                    );
-                } else {
-                    error!(
-                        "[degree_level={degree_level} degree_unibo_slug={degree_name} year={year}] Network/request error while getting degree structure URL: {url}; {err}"
-                    );
-                }
-                return None;
-            }
-        };
-        let text = match res.text() {
-            Ok(text) => text,
-            Err(err) => {
-                error!(
-                    "[degree_level={degree_level} degree_unibo_slug={degree_name} year={year}] Response decoding error for degree structure URL {url}: {err}"
-                );
-                return None;
-            }
-        };
-        let document = Html::parse_document(&text);
-        let link = document.select(&FIRST_LINK).next()?;
-        let href = link.value().attr("href")?.to_string();
-        debug!(
-            "[degree_level={degree_level} degree_unibo_slug={degree_name} year={year}] Got link: {href}"
-        );
-        Some((year, href))
-    };
-
     (first_scraped_year..previous_academic_year)
         .into_par_iter()
-        .filter_map(get_degree_structure_url)
+        .filter_map(|year| get_degree_structure_url(degree_level, &degree_name, year))
         .collect()
 }
 
@@ -172,7 +192,7 @@ fn name_and_code_to_slug(name: &str, code: &String) -> String {
 }
 
 /// Attempts converting a [Predegree] into a [Degree]. Fails if either field of
-/// the input is empty. To do so, it performs some webscraping.
+/// the input is empty. To do so, it performs some web-scraping.
 fn parse_degree(predegree: &Predegree) -> Option<Degree> {
     let Predegree { name, id, code } = predegree;
     if name.is_empty() || id.is_empty() || code.is_empty() {
@@ -189,7 +209,7 @@ fn parse_degree(predegree: &Predegree) -> Option<Degree> {
 }
 
 /// Converts a vector of predegrees into one of degrees. Failed conversions will
-/// not be part of the output. To perform the conversion, some webscraping is
+/// not be part of the output. To perform the conversion, some web-scraping is
 /// necessary.
 fn to_degrees(predegrees: Vec<Predegree>) -> Vec<Degree> {
     predegrees.par_iter().filter_map(parse_degree).collect()
@@ -228,7 +248,7 @@ fn result_to_option_with_print<T, E: Display>(r: Result<T, E>) -> Option<T> {
 
 /// It looks for a link to the course page and course name in the HTML, and
 /// returns them
-fn get_course_data(course_html: scraper::ElementRef<'_>) -> Option<(String, String)> {
+fn get_course_data(course_html: scraper::ElementRef<'_>) -> Option<CourseData> {
     let a_el = course_html
         .children()
         .filter_map(|f| f.value().as_element())
@@ -242,71 +262,78 @@ fn get_course_data(course_html: scraper::ElementRef<'_>) -> Option<(String, Stri
 
 /// Scrapes a yearly degree structure URL, returning textual content for it.
 fn analyze_year_with_error(
-    ((year, url), (degree_slug, degree_name)): ((&u32, &String), (&String, &String)),
-) -> Result<(u32, String), String> {
+    ((year, url), (degree_slug, degree_name)): ((&AcademicYear, &Url), (&DegreeSlug, &DegreeName)),
+) -> Result<DegreeAnalysis, String> {
     info!(
         "[degree_slug={degree_slug} degree_name={degree_name} year={year}] Analysing link: {url}"
     );
-    let res = get_status_checked_with_retry(url).map_err(|e| {
-        if let Some(status) = e.status() {
-            format!(
-                "[degree_slug={degree_slug} degree_name={degree_name} year={year}] Server error HTTP {status} for {url}: {e}"
+
+    let text = get_status_checked_with_retry(url)
+        .map_err(|e| {
+            e.status().map_or_else(
+                || {
+                    format!(
+                        "[degree_slug={degree_slug} degree_name={degree_name} year={year}] Network error for {url}: {e}"
+                    )
+                },
+                |status| {
+                    format!(
+                        "[degree_slug={degree_slug} degree_name={degree_name} year={year}] Server error HTTP {status} for {url}: {e}"
+                    )
+                },
             )
-        } else {
+        })?
+        .text()
+        .map_err(|e| {
             format!(
-                "[degree_slug={degree_slug} degree_name={degree_name} year={year}] Network error for {url}: {e}"
+                "[degree_slug={degree_slug} degree_name={degree_name} year={year}] Decoding error for {url}: {e}"
             )
-        }
-    })?;
-    let text = res.text().map_err(|e| {
-        format!("[degree_slug={degree_slug} degree_name={degree_name} year={year}] Decoding error for {url}: {e}")
-    })?;
-    let document = Html::parse_document(&text);
-    let title = format!("= {degree_name} ({year})\n\n");
-    let courses_data: Vec<_> = document
+        })?;
+
+    let courses = Html::parse_document(&text)
         .select(&TABLE)
         .filter_map(get_course_data)
-        .collect();
-
-    let courses = courses_data
+        .collect::<Vec<_>>()
         .into_par_iter()
         .filter_map(|(url, name)| {
             debug!(
                 "[degree_slug={degree_slug} degree_name={degree_name} year={year} course_name={name}] Visiting teaching link: {url}"
             );
-            match scrape_link(&url, degree_slug, year) {
-                Ok(content) => Some(content),
-                Err(err) => {
+
+            scrape_link(&url, degree_slug, year)
+                .map_err(|err| {
                     error!(
                         "[degree_slug={degree_slug} degree_name={degree_name} year={year} course_name={name} course_url={url}] {err}"
                     );
-                    None
-                }
-            }
+                })
+                .ok()
         })
         .collect::<String>();
-    Ok((*year, title + courses.as_str()))
+
+    Ok((*year, format!("= {degree_name} ({year})\n\n{courses}")))
 }
 
 /// Given a year, a degree structure URL, a degree slug, and a degree name,
-/// attempts to perform webscraping and return a textual representation of the
+/// attempts to perform web-scraping and return a textual representation of the
 /// response.
-fn analyze_year(x: ((&u32, &String), (&String, &String))) -> Option<(u32, String)> {
+fn analyze_year(x: ((&AcademicYear, &Url), (&DegreeSlug, &DegreeName))) -> Option<DegreeAnalysis> {
     result_to_option_with_print(analyze_year_with_error(x))
 }
 
 /// Scrapes the yearly degree structure URLs specified by a degree, returning
 /// textual content for each.
-pub fn analyze_degree(degree: &Degree) -> Result<HashMap<u32, String>, Box<dyn Error>> {
+pub fn analyze_degree(degree: &Degree) -> Result<DegreeStructures, Box<dyn Error>> {
     let Degree {
         slug,
         name,
         year_urls,
     } = degree;
+
     let res = year_urls
         .par_iter()
         .filter_map(|(year, url)| analyze_year(((year, url), (slug, name))))
         .collect();
+
     Ok(res)
 }
 
