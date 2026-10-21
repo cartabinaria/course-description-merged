@@ -44,6 +44,7 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - run: cargo check
+      - run: cargo test --locked
       - run: cargo clippy --no-deps
       - run: cargo fmt --check
   scraper:
